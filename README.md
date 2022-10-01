@@ -1,2 +1,2 @@
 # RUP
-Renegade User Packer
+Renegade User Packer for v1.30/DOS
