@@ -371,7 +371,7 @@ BEGIN { User/SCN Packer }
   IF (ParamCount <> 0) AND (AllCaps(ParamStr(1))='/M') THEN
 	BEGIN
 
-  OpenSCN('c:\renegade\msgs\NEWBB.SCN',FileErr);
+  OpenSCN(RenegadeDatIn.MsgPath + 'NEWBB.SCN', FileErr);
   
   FOR RecCount := 0 TO FileSize(SCN)-1 DO
 	BEGIN
