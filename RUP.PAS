@@ -35,6 +35,9 @@ VAR
   NewSCNIn      : ScanRec;
   SCN_FName     : String;
   TookOut       : Array [0..6500] OF Integer;
+  OldToNew      : Array [0..6500] OF Integer; { Mapping: old user # -> new user # (or -1 if removed) }
+  OldUsersMax   : Integer;
+  NewUsersMax   : Integer;
   TookOutCountUser,
   TookOutCountScanRec,
   TookOutCountScanRecTot,
@@ -44,6 +47,7 @@ VAR
   OldBackupOne,
   OldBackupTwo  : File;
   Skip          : Boolean;
+  NeedReplace  : Boolean;
   RecCount,
   NewRecCount,
   C1,
@@ -95,13 +99,13 @@ VAR
 	Loop: Byte;
   BEGIN
     ClrScr;
-	Pipe('|07                     Renegade BBS User Packer Ã„ Version 1.0',TRUE);
-	Pipe('|07              Copyright (c) 2022 The Renegade BBS Development Team',TRUE);
+        Pipe('|07                     Renegade BBS User Packer Ä Version 1.1',TRUE);
+	Pipe('|07              Copyright (c) 2022-2026 The Renegade BBS Development Team',TRUE);
     GoToXY(1,3);
-    Pipe('|08 Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„',TRUE);
+    Pipe('|08 ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ',TRUE);
     FOR Loop := 1 TO 18 DO
 	  Pipe('',TRUE);
-    Pipe('|08 Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„Ã„',TRUE);
+    Pipe('|08 ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ',TRUE);
     Window(2,4,78,21);
   END;
 
@@ -130,7 +134,73 @@ VAR
 	  FileExist := FALSE;
   END;
 
-  FUNCTION IntToStr(InInt: LongInt): String;
+
+  PROCEDURE RemapHdrFile(HdrName: String);
+VAR
+  HdrFile : FILE OF MHeaderRec;
+  HdrRec  : MHeaderRec;
+  OldFM   : Byte;
+  I       : LongInt;
+BEGIN
+  IF NOT FileExist(HdrName) THEN
+    Exit;
+
+  OldFM := FileMode;
+  FileMode := 2; { read/write }
+  Assign(HdrFile,HdrName);
+  {$I-} Reset(HdrFile); {$I+}
+  FileMode := OldFM;
+  IF (IOResult <> 0) THEN
+    Exit;
+
+  FOR I := 0 TO FileSize(HdrFile)-1 DO
+    BEGIN
+      Seek(HdrFile,I);
+      Read(HdrFile,HdrRec);
+
+      { Remap FROM }
+      IF (HdrRec.From.UserNum <= 6500) THEN
+        BEGIN
+          IF (OldToNew[HdrRec.From.UserNum] <> -1) THEN
+            HdrRec.From.UserNum := OldToNew[HdrRec.From.UserNum]
+          ELSE
+            HdrRec.From.UserNum := 0;
+        END;
+
+      { Remap TO }
+      IF (HdrRec.MTO.UserNum <= 6500) THEN
+        BEGIN
+          IF (OldToNew[HdrRec.MTO.UserNum] <> -1) THEN
+            HdrRec.MTO.UserNum := OldToNew[HdrRec.MTO.UserNum]
+          ELSE
+            HdrRec.MTO.UserNum := 0;
+        END;
+
+      Seek(HdrFile,I);
+      Write(HdrFile,HdrRec);
+    END;
+
+  Close(HdrFile);
+END;
+
+PROCEDURE RemapAllMsgHeaders;
+VAR
+  DirInfo2: SearchRec;
+  PathMask: String;
+BEGIN
+  Pipe('|08ş |07Remapping message headers (*.HDR) ... ',TRUE);
+  PathMask := AddSlash(RenegadeDatIn.MsgPath) + '*.HDR';
+  {$I-}FindFirst(PathMask,AnyFile,DirInfo2);{$I+}
+  WHILE (DOSError = 0) DO
+    BEGIN
+      Pipe('   |08- |07'+DirInfo2.Name+' ',FALSE);
+      RemapHdrFile(AddSlash(RenegadeDatIn.MsgPath)+DirInfo2.Name);
+      Pipe(Check,TRUE);
+      {$I-}FindNext(DirInfo2);{$I+}
+    END;
+END;
+
+FUNCTION IntToStr(InInt: LongInt): String;
   VAR
 	S: String;
   BEGIN
@@ -165,7 +235,7 @@ VAR
 	IF (RGDir <> '') AND (RGDir[Length(RGDir)] <> '\') THEN
 	  RGDir := RGDir + '\';
 	IF (RGDir = '') OR (NOT DirExist(RGDir)) THEN
-	  Error(' Ã¾ RENEGADE.DAT not found!');
+          Error(' ş RENEGADE.DAT not found!');
   END;
 
   FUNCTION AllCaps(InString: STRING): STRING;
@@ -245,7 +315,7 @@ BEGIN { User/SCN Packer }
 
   OpenRenegadeDat(RGDir,FileErr);
   IF FileErr THEN
-	Error(' Ã¾ RENEGADE.DAT not found!'); { I think this is redundant because of GetRGDir }
+        Error(' ş RENEGADE.DAT not found!'); { I think this is redundant because of GetRGDir }
 	
   ReadFromRenegadeDat(RenegadeDatIn);
   CloseRenegadeDat;
@@ -254,18 +324,18 @@ BEGIN { User/SCN Packer }
   
   OpenUsersIDX(DatDir,FileErr);
   IF FileErr THEN
-	Error(' Ã¾ USERS.IDX not found!');
+        Error(' ş USERS.IDX not found!');
   OpenUsersDat(DatDir,FileErr);
   IF FileErr THEN
-	Error(' Ã¾ USERS.DAT not found!');
+        Error(' ş USERS.DAT not found!');
 
   { Assign and ReWrite new IDX and DAT files }
   OpenNewUsersIDX(DatDir,FileErr);
   IF FileErr THEN
-	Error(' Ã¾ USER_IDX.NEW not found!');
+        Error(' ş USER_IDX.NEW not found!');
   OpenNewUsersDat(DatDir,FileErr);
   IF FileErr THEN
-	Error(' Ã¾ USER_DAT.NEW not found!');
+        Error(' ş USER_DAT.NEW not found!');
    
   { --- }
 
@@ -322,7 +392,7 @@ EXIT;
   { Generate TEMPORARY new user index }
   FillChar(TookOut,SizeOf(TookOut),' ');
   TookOutCountUser := 0;
-  Pipe('|08Ã¾ |07Scanning for deleted users ... ',FALSE);
+  Pipe('|08ş |07Scanning for deleted users ... ',FALSE);
   FOR RecCount := 0 TO (FileSize(UsersIdx)-1) DO
 	BEGIN
       ReadFromUsersIdx(UsersIdxIn,RecCount);
@@ -373,22 +443,45 @@ EXIT;
     Pipe('|07'+IntToStr(TookOutCountUser)+' deleted records found!',TRUE);
 	
   { Generate new user data file }
-  Pipe('|08Ã¾ |07Writing new user data file ... ',FALSE);
+  Pipe('|08ş |07Writing new user data file ... ',FALSE);
   NewRecCount := 0;
+
+  { Build old->new user number map while writing the new USERS.DAT }
+  FillChar(OldToNew,SizeOf(OldToNew),#255); { sets all bytes to 255 => -1 for Integer on TP }
+  OldUsersMax := FileSize(UsersDat)-1;
+  NewUsersMax := 0;
   
   ReadFromUsersDat(UsersDatIn,0); { Add default new user configuration account }
   WriteToNewUsersDat(UsersDatIn,0); { ^ }
   
+
+  OldToNew[0] := 0;
+  NewUsersMax := 0;
   FOR RecCount := 0 TO (FileSize(NewUsersIdx)-1) DO
 	BEGIN
       ReadFromNewUsersIdx(NewUsersIdxIn,RecCount);
       ReadFromUsersDat(UsersDatIn,NewUsersIdxIn.Number); { Read from old USERS.DAT using new index }
       IF NewUsersIdxIn.Number <> 0 THEN
-		BEGIN
-		  Inc(NewRecCount);
-		  WriteToNewUsersDat(UsersDatIn,NewRecCount);
-		END;
+        BEGIN
+          Inc(NewRecCount);
+          WriteToNewUsersDat(UsersDatIn,NewRecCount);
+          IF (NewUsersIdxIn.Number >= 0) AND (NewUsersIdxIn.Number <= 6500) THEN
+            OldToNew[NewUsersIdxIn.Number] := NewRecCount;
+          NewUsersMax := NewRecCount;
+        END;
 	END;
+{ Second pass: remap per-user fields that store user numbers (e.g., ForUsr) }
+FOR RecCount := 0 TO NewUsersMax DO
+  BEGIN
+    ReadFromNewUsersDat(NewUsersDatIn,RecCount);
+    IF (NewUsersDatIn.ForUsr > 0) AND (NewUsersDatIn.ForUsr <= 6500) THEN
+      IF (OldToNew[NewUsersDatIn.ForUsr] <> -1) THEN
+        NewUsersDatIn.ForUsr := OldToNew[NewUsersDatIn.ForUsr]
+      ELSE
+        NewUsersDatIn.ForUsr := 0;
+    WriteToNewUsersDat(NewUsersDatIn,RecCount);
+  END;
+
   IF (IOResult <> 0) THEN
 	Error('Unable to write new user data file!')
   ELSE
@@ -400,7 +493,7 @@ EXIT;
   CloseUsersDat;
   CloseNewUsersDat;
 
-  Pipe('|08Ã¾ |07Deleting previous backups ... ',true);
+  Pipe('|08ş |07Deleting previous backups ... ',true);
   
   IF FileExist(DatDir+'USER_IDX.BAK') THEN
 	BEGIN
@@ -427,7 +520,7 @@ EXIT;
 		Pipe(Check,TRUE);
 	END;
 
-  Pipe('|08Ã¾ |07Backing up user index and data files ... ',true);
+  Pipe('|08ş |07Backing up user index and data files ... ',true);
   Pipe('   |08- |07USER.IDX ',FALSE);
   Rename(UsersIdx,DatDir+'USER_IDX.BAK');
   IF IOresult <> 0 THEN
@@ -441,7 +534,7 @@ EXIT;
   ELSE
 	Pipe(Check,TRUE);
 	
-  Pipe('|08Ã¾ |07Updating user index and data files ... ',TRUE);
+  Pipe('|08ş |07Updating user index and data files ... ',TRUE);
   Pipe('   |08- |07USER.IDX ',FALSE);
   Rename(NewUsersIdx,DatDir+'USERS.IDX');
   IF IOresult <> 0 THEN
@@ -463,7 +556,7 @@ EXIT;
   { -- UPDATE MSG SCAN RECORDS -- } (* MORE EFFECIENT FIND CODE *)
   
   { Find the first scan record }
-  Pipe('|08Ã¾ |07Scanning for message scan record files ... ',TRUE);
+  Pipe('|08ş |07Scanning for message scan record files ... ',TRUE);
 
   Path2SCN := AddSlash(RenegadeDatIn.MsgPath)+'*.SCN';
   {StrPCopy(Path2SCNPChar,Path2SCN);}
@@ -477,6 +570,8 @@ EXIT;
 	  { Initialize }
 	  Skip := False;
 	  C1   := 0;
+	  NeedReplace := False;
+	  C1   := 0;
 	  TookOutCountScanRec := 0; { LeeW: Added }
 	  Inc(ScanFilesCount);
 	  
@@ -485,46 +580,38 @@ EXIT;
 
 	  OpenSCN(Path2SCN+DirInfo.Name,FileErr);
 	  IF FileErr THEN
-		Error('|08Ã¾ |07Unable to open message scan file '+DirInfo.Name+'!');
+                Error('|08ş |07Unable to open message scan file '+DirInfo.Name+'!');
 	  OpenNewSCN(Path2SCN+'SCN.NEW',FileErr);
 	  IF FileErr THEN
-		Error('|08Ã¾ |07Unable to open message scan file SCN.NEW!');
+                Error('|08ş |07Unable to open message scan file SCN.NEW!');
 
 	  { Generate new scan record file }
 	  
-	  {Pipe('|07Ã¾ Startting TO Synch Msgs Scan Records with User Records',TRUE);}
+          {Pipe('|07ş Startting TO Synch Msgs Scan Records with User Records',TRUE);}
 	  
 	  Pipe('      |08- |07GENERATE ',FALSE);
-	  
-	  FOR RecCount := 0 TO FileSize(SCN)-1 DO
-		BEGIN
-		  { If record was deleted, then skip ... }
-		  (*FOR C2 := 0 TO TookOutCount DO*)
-			BEGIN
-			  IF RecCount = TookOut[RecCount] THEN
-				Skip := TRUE
-			  ELSE
-				Skip := FALSE;
-			  {IF Skip THEN
-				Break;}
-			END;
-		  { ... else write it to new record }
-		  IF NOT Skip THEN
-			BEGIN
-			  {Pipe('|08Ã¾ |07Kept record #'+IntToStr(C1),TRUE);}
-			  ReadFromSCN(SCNIn,RecCount);
-			  WriteToNewSCN(SCNIn,C1);
-			  Inc(C1);
-			  (*Inc(SCNUpdateCount); { LeeW: Added }*)
-			END
-		  ELSE
-			Inc(TookOutCountScanRec);
-			{Pipe('Removed record #'+IntToStr(C1),TRUE);}
-		END;
-		
-	  Pipe(Check,FALSE); { Successful generation }
-		
-	  IF (FileSize(SCN) > FileSize(NewSCN)) THEN 
+
+      { Rebuild scan records using old->new user mapping so records follow the new user numbers }
+      FillChar(NewSCNIn,SizeOf(NewSCNIn),0);
+      FOR RecCount := 0 TO NewUsersMax DO
+        WriteToNewSCN(NewSCNIn,RecCount);
+
+      TookOutCountScanRec := 0;
+      FOR RecCount := 0 TO FileSize(SCN)-1 DO
+        BEGIN
+          IF (RecCount <= 6500) AND (OldToNew[RecCount] <> -1) THEN
+            BEGIN
+              ReadFromSCN(SCNIn,RecCount);
+              WriteToNewSCN(SCNIn,OldToNew[RecCount]);
+              IF OldToNew[RecCount] <> RecCount THEN
+                NeedReplace := True;
+            END
+          ELSE
+            Inc(TookOutCountScanRec);
+        END;
+
+      Pipe(Check,FALSE); { Successful generation }
+	  IF NeedReplace OR (TookOutCountScanRec > 0) OR (FileSize(SCN) <> FileSize(NewSCN)) THEN 
 		BEGIN { Records were removed }
 		  { Delete old record and replace with new record }
 		  Pipe(' |07DELETE ',FALSE); {}
@@ -550,16 +637,17 @@ EXIT;
 		  Erase(NewSCN);
 		  CloseNewSCN;
 		END;
-	  Inc(tookoutcountscanrectot,tookoutcountscanrec);
+  Inc(tookoutcountscanrectot,tookoutcountscanrec);
 	  {$I-}FindNext(DirInfo);{$I+}
 	END;
   
   IF (DOSError <> 0) AND (ScanFilesCount = 0) THEN
-	Error('|08Ã¾ |07Unable to locate any .SCN files!');
-  
+        Error('|08ş |07Unable to locate any .SCN files!');
   { -- END OF MSG SCAN RECORDS -- }
 
-  Pipe('|08Ã¾ |07Finished!',TRUE);
+  RemapAllMsgHeaders;
+
+  Pipe('|08ş |07Finished!',TRUE);
   Pipe('   |08- |07'+IntToStr(TookOutCountUser)+' user records removed|08',TRUE);
   Pipe('   |08- |07'+IntToStr(TookOutCountScanRecTot)+' scan records removed (from '
 					+IntToStr(ScanFilesCount)+' scan files)',FALSE);
